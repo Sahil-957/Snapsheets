@@ -9,3 +9,4 @@ numpy==2.2.5
 Pillow==11.2.1
 google-cloud-vision==3.10.2
 pydantic-settings==2.9.1
+gunicorn
