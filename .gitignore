@@ -1,0 +1,9 @@
+frontend/node_modules
+frontend/.next
+backend/.venv
+backend/storage
+__pycache__
+*.pyc
+.env
+.env.local
+snapsheet-492612-4064e9f63af6.json
