@@ -11,14 +11,13 @@ FIELD_PATTERNS: dict[str, list[str]] = {
     "agent": [r"AGENT[:\s\-]*([A-Z0-9&.,\- ]{2,80})"],
     "customer": [r"CUSTOMER[:\s\-]*([A-Z0-9&.,\- ]{2,80})"],
     "quality": [r"QUALITY[:\s\-]*([A-Z0-9/\- ]{2,80})"],
-    "warp_counts": [r"WARP(?: COUNT)?S?[:\s\-]*([A-Z0-9/.\- xX]+)"],
-    "weft_counts": [r"WEFT(?: COUNT)?S?[:\s\-]*([A-Z0-9/.\- xX]+)"],
+    "warp_count": [r"WARP(?: COUNT)?S?[:\s\-]*([A-Z0-9/.\- xX]+)"],
+    "weft_count": [r"WEFT(?: COUNT)?S?[:\s\-]*([A-Z0-9/.\- xX]+)"],
     "total_price": [r"TOTAL PRICE[:\s\-]*([0-9,.]+)"],
     "target_price": [r"TARGET PRICE[:\s\-]*([0-9,.]+)"],
     "order_quantity": [r"ORDER QUANTITY[:\s\-]*([A-Z0-9,. ]+)"],
-    "yarn_requirement": [r"YARN REQUIREMENT[:\s\-]*([A-Z0-9,. ]+)"],
-    "composition": [r"COMPOSITION[:\s\-]*([A-Z0-9/% ,.\-]+)"],
-    "gsm_fabric_weight": [r"(?:GSM|FABRIC WEIGHT)[:\s\-]*([A-Z0-9,. ]+)"],
+    "yarn_requirement_total": [r"TOTAL[:\s\-]*([0-9,.]+)"],
+    "fabric_weight_glm_inc_sizing": [r"(?:FABRIC WEIGHT|\(GLM\) INC\. SIZING)[:\s\-]*([A-Z0-9,. ]+)"],
 }
 
 
@@ -101,7 +100,7 @@ def parse_structured_text(image_name: str, text: str, confidence: float, engine:
         "total_price": ["TOTAL PRICE", "TOTAL PRICE*"],
         "target_price": ["TARGET PRICE"],
         "order_quantity": ["ORDER QUANTITY"],
-        "gsm_fabric_weight": ["FABRIC WEIGHT", "(GLM) INC. SIZING"],
+        "fabric_weight_glm_inc_sizing": ["FABRIC WEIGHT", "(GLM) INC. SIZING"],
     }
 
     for field_name, labels in line_map.items():
@@ -111,13 +110,20 @@ def parse_structured_text(image_name: str, text: str, confidence: float, engine:
     quality = row.quality or ""
     count_pairs = re.findall(r"(\d+\*\d+|\d+/\d+)", quality)
     if count_pairs:
-        row.warp_counts = count_pairs[0]
+        row.warp_count = count_pairs[0]
         if len(count_pairs) > 1:
-            row.weft_counts = count_pairs[1]
+            row.weft_count = count_pairs[1]
 
     yarn_matches = re.findall(r"(WARP\d*|WEFT\d*|TOTAL)\s*[:\-]?\s*([0-9]+(?:\.\d+)?)", normalized)
     if yarn_matches:
-        row.yarn_requirement = ", ".join(f"{label}: {value}" for label, value in yarn_matches)
+        for label, value in yarn_matches:
+            upper = label.upper()
+            if upper.startswith("WARP1"):
+                row.yarn_requirement_warp1 = value
+            elif upper.startswith("WEFT1") or upper == "WEFT":
+                row.yarn_requirement_weft1 = value
+            elif upper == "TOTAL":
+                row.yarn_requirement_total = value
 
     yarn_section_match = re.search(
         r"YARN REQUIREMENT\s*(.*?)\s*COVER FACTOR",
@@ -128,17 +134,24 @@ def parse_structured_text(image_name: str, text: str, confidence: float, engine:
         yarn_section = yarn_section_match.group(1)
         yarn_matches = re.findall(r"(WARP\d*|WEFT\d*|TOTAL)\s*[:\-]?\s*([0-9]+(?:\.\d+)?)", yarn_section)
         if yarn_matches:
-            row.yarn_requirement = ", ".join(f"{label}: {value}" for label, value in yarn_matches)
+            for label, value in yarn_matches:
+                upper = label.upper()
+                if upper.startswith("WARP1"):
+                    row.yarn_requirement_warp1 = value
+                elif upper.startswith("WEFT1") or upper == "WEFT":
+                    row.yarn_requirement_weft1 = value
+                elif upper == "TOTAL":
+                    row.yarn_requirement_total = value
 
-    if not row.composition:
+    if not row.remark:
         composition_tokens = [token for token in ["COTTON", "LINEN", "VISCOSE", "PC", "BCI"] if token in quality.upper()]
         if composition_tokens:
-            row.composition = ", ".join(composition_tokens)
+            row.remark = ", ".join(composition_tokens)
 
-    if not row.weft_counts:
-        row.weft_counts = _extract(FIELD_PATTERNS["weft_counts"], normalized)
-    if not row.warp_counts:
-        row.warp_counts = _extract(FIELD_PATTERNS["warp_counts"], normalized)
+    if not row.weft_count:
+        row.weft_count = _extract(FIELD_PATTERNS["weft_count"], normalized)
+    if not row.warp_count:
+        row.warp_count = _extract(FIELD_PATTERNS["warp_count"], normalized)
 
     low_confidence_fields: list[str] = [
         field_name for field_name in FIELD_PATTERNS if not getattr(row, field_name, None)

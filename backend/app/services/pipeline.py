@@ -22,7 +22,7 @@ def _process_single_file(image_path: Path, confidence_threshold: float) -> tuple
         return cached, checksum
 
     row = extract_layout_fields(image_path)
-    critical_fields = ["total_price", "target_price", "order_quantity", "yarn_requirement"]
+    critical_fields = ["total_price", "target_price", "order_quantity", "yarn_requirement_total"]
     needs_fallback = (
         row.ocr_confidence < confidence_threshold
         or any(getattr(row, field_name, None) in (None, "", []) for field_name in critical_fields)
@@ -40,9 +40,10 @@ def _process_single_file(image_path: Path, confidence_threshold: float) -> tuple
             "total_price",
             "target_price",
             "order_quantity",
-            "yarn_requirement",
-            "gsm_fabric_weight",
-            "composition",
+            "yarn_requirement_warp1",
+            "yarn_requirement_weft1",
+            "yarn_requirement_total",
+            "fabric_weight_glm_inc_sizing",
         }
         for field_name in fallback_row.model_dump():
             fallback_value = getattr(fallback_row, field_name, None)
@@ -75,8 +76,9 @@ async def run_job(
     batch_size: int,
     confidence_threshold: float,
     output_dir: Path,
+    output_filename: str | None = None,
 ) -> None:
-    output_path = output_dir / f"{job_id}.xlsx"
+    output_path = output_dir / (output_filename or f"{job_id}.xlsx")
     store.update_job(
         job_id,
         status="running",

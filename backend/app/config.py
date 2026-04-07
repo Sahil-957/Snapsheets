@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     max_workers: int = 4
     batch_size: int = 10
     upload_max_files: int = 10000
+    export_retention_days: int = 7
     tesseract_cmd: str | None = None
     google_application_credentials: str | None = None
 

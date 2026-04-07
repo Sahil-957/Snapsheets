@@ -1,12 +1,13 @@
 import { getExportDownloadUrl } from "@/lib/api";
 import { ExportEntry } from "@/types";
-import { Download } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 
 type ExportHistoryProps = {
   exports: ExportEntry[];
+  onDelete: (filename: string) => void | Promise<void>;
 };
 
-export function ExportHistory({ exports }: ExportHistoryProps) {
+export function ExportHistory({ exports, onDelete }: ExportHistoryProps) {
   return (
     <section className="rounded-[2rem] bg-white/85 p-6 shadow-panel">
       <div className="flex items-center justify-between gap-4">
@@ -34,13 +35,23 @@ export function ExportHistory({ exports }: ExportHistoryProps) {
                   {new Date(entry.created_at).toLocaleString()}
                 </p>
               </div>
-              <a
-                href={getExportDownloadUrl(entry)}
-                className="inline-flex items-center gap-2 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-sand"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
+              <div className="flex items-center gap-3">
+                <a
+                  href={getExportDownloadUrl(entry)}
+                  className="inline-flex items-center gap-2 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-sand"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+                <button
+                  type="button"
+                  onClick={() => onDelete(entry.filename)}
+                  className="inline-flex items-center gap-2 rounded-full border border-coral/20 bg-white px-4 py-2 text-sm font-semibold text-coral transition hover:bg-coral/5"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
             </div>
           ))
         )}

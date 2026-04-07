@@ -114,6 +114,7 @@ The current implementation uses:
 - Regex and keyword matching
 - Low-confidence field marking for review
 - In-memory caching by file checksum to avoid reprocessing duplicates
+- Automatic cleanup of old Excel exports after 7 days by default
 
 ## Notes for Production
 

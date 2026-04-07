@@ -41,11 +41,11 @@ export async function uploadImages(
   });
 }
 
-export async function startProcessing(uploadId: string): Promise<ProcessResponse> {
+export async function startProcessing(uploadId: string, exportName?: string): Promise<ProcessResponse> {
   const response = await fetch(`${API_BASE_URL}/process`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ upload_id: uploadId }),
+    body: JSON.stringify({ upload_id: uploadId, export_name: exportName || null }),
   });
 
   return parseJson<ProcessResponse>(response);
@@ -85,4 +85,11 @@ export async function fetchExports(): Promise<ExportEntry[]> {
     cache: "no-store",
   });
   return parseJson<ExportEntry[]>(response);
+}
+
+export async function deleteExport(filename: string): Promise<JobActionResponse> {
+  const response = await fetch(`${API_BASE_URL}/exports/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  });
+  return parseJson<JobActionResponse>(response);
 }

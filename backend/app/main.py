@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +37,28 @@ def ensure_storage() -> None:
 ensure_storage()
 
 
+def purge_expired_exports() -> None:
+    cutoff = datetime.now() - timedelta(days=settings.export_retention_days)
+    for file_path in settings.outputs_path.glob("*.xlsx"):
+        modified_at = datetime.fromtimestamp(file_path.stat().st_mtime)
+        if modified_at < cutoff:
+            file_path.unlink(missing_ok=True)
+
+
+def build_export_filename(name: str | None, fallback_job_id: str) -> str:
+    if name:
+        safe = re.sub(r"[^A-Za-z0-9._ -]+", "", name).strip()
+        safe = safe.rstrip(". ")
+        if safe:
+            if not safe.lower().endswith(".xlsx"):
+                safe = f"{safe}.xlsx"
+            return safe
+    return f"{fallback_job_id}.xlsx"
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
+    purge_expired_exports()
     return {"status": "ok"}
 
 
@@ -73,6 +94,7 @@ async def upload_images(request: Request) -> UploadResponse:
 
 @app.post("/process", response_model=ProcessResponse)
 async def process_images(request: ProcessRequest, background_tasks: BackgroundTasks) -> ProcessResponse:
+    purge_expired_exports()
     files = store.get_upload_files(request.upload_id)
     if not files:
         raise HTTPException(status_code=404, detail="Upload session not found or empty.")
@@ -86,6 +108,8 @@ async def process_images(request: ProcessRequest, background_tasks: BackgroundTa
     job = store.create_job(request.upload_id, len(files))
     batch_size = request.batch_size or settings.batch_size
     confidence_threshold = request.confidence_threshold or settings.tesseract_confidence_threshold
+    output_filename = build_export_filename(request.export_name, job.job_id)
+    store.update_job(job.job_id, output_filename=output_filename)
 
     background_tasks.add_task(
         run_job,
@@ -95,6 +119,7 @@ async def process_images(request: ProcessRequest, background_tasks: BackgroundTa
         batch_size,
         confidence_threshold,
         settings.outputs_path,
+        output_filename,
     )
     return ProcessResponse(job_id=job.job_id, upload_id=request.upload_id, status=job.status)
 
@@ -129,6 +154,7 @@ async def stop_job(job_id: str) -> JobActionResponse:
 
 @app.get("/exports", response_model=list[ExportEntry])
 async def list_exports() -> list[ExportEntry]:
+    purge_expired_exports()
     jobs_by_filename = {
         job.output_filename: job
         for job in store.list_jobs()
@@ -153,6 +179,7 @@ async def list_exports() -> list[ExportEntry]:
 
 @app.get("/exports/{filename}")
 async def download_previous_export(filename: str) -> FileResponse:
+    purge_expired_exports()
     file_path = settings.outputs_path / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Export file not found.")
@@ -163,8 +190,18 @@ async def download_previous_export(filename: str) -> FileResponse:
     )
 
 
+@app.delete("/exports/{filename}", response_model=JobActionResponse)
+async def delete_previous_export(filename: str) -> JobActionResponse:
+    file_path = settings.outputs_path / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Export file not found.")
+    file_path.unlink(missing_ok=True)
+    return JobActionResponse(job_id=filename, status="deleted", message=f"{filename} deleted successfully.")
+
+
 @app.get("/download")
 async def download_excel(job_id: str) -> FileResponse:
+    purge_expired_exports()
     job = store.get_job(job_id)
     if not job or not job.output_filename:
         raise HTTPException(status_code=404, detail="Excel file not ready.")

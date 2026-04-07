@@ -4,13 +4,14 @@ import { Dropzone } from "@/components/dropzone";
 import { ExportHistory } from "@/components/export-history";
 import { PreviewTable } from "@/components/preview-table";
 import { StatusPanel } from "@/components/status-panel";
-import { fetchExports, fetchJobStatus, getDownloadUrl, pauseJob, startProcessing, stopJob, uploadImages } from "@/lib/api";
+import { deleteExport, fetchExports, fetchJobStatus, getDownloadUrl, pauseJob, startProcessing, stopJob, uploadImages } from "@/lib/api";
 import { ExportEntry, JobStatus } from "@/types";
 import { Download, LoaderCircle, Pause, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
+  const [exportName, setExportName] = useState("");
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<JobStatus | null>(null);
@@ -111,7 +112,7 @@ export default function Home() {
     setProcessingState("starting");
 
     try {
-      const response = await startProcessing(uploadId);
+      const response = await startProcessing(uploadId, exportName.trim());
       setJobId(response.job_id);
       setProcessingState(response.status);
     } catch (processError) {
@@ -133,6 +134,20 @@ export default function Home() {
               This app batches large image sets, preprocesses screenshots, runs hybrid OCR with a Google Vision fallback,
               and keeps processing even when some files fail.
             </p>
+
+            <div className="mt-6 max-w-md">
+              <label htmlFor="export-name" className="mb-2 block text-sm font-semibold text-ink/75">
+                Excel File Name
+              </label>
+              <input
+                id="export-name"
+                type="text"
+                value={exportName}
+                onChange={(event) => setExportName(event.target.value)}
+                placeholder="january-2025-domestic-costing"
+                className="w-full rounded-2xl border border-ink/15 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-teal"
+              />
+            </div>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <button
@@ -222,6 +237,7 @@ export default function Home() {
                   setUploadState("idle");
                   setUploadProgress(0);
                   setProcessingState("idle");
+                  setExportName("");
                   setError(null);
                 }}
                 className="inline-flex items-center gap-2 rounded-full border border-ink/15 bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:bg-mist"
@@ -248,7 +264,18 @@ export default function Home() {
         </section>
 
         <section className="mt-8">
-          <ExportHistory exports={exports} />
+          <ExportHistory
+            exports={exports}
+            onDelete={async (filename) => {
+              setError(null);
+              try {
+                await deleteExport(filename);
+                setExports(await fetchExports());
+              } catch (deleteError) {
+                setError(deleteError instanceof Error ? deleteError.message : "Delete failed.");
+              }
+            }}
+          />
         </section>
       </div>
     </main>
