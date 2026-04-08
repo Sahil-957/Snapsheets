@@ -52,6 +52,11 @@ def build_export_filename(name: str | None, fallback_job_id: str) -> str:
     return f"{fallback_job_id}.xlsx"
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"status": "ok", "service": settings.app_name}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     purge_expired_exports()

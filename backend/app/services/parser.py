@@ -164,6 +164,7 @@ def parse_structured_text(image_name: str, text: str, confidence: float, engine:
 def error_row(image_path: Path, message: str) -> ExtractedRow:
     return ExtractedRow(
         image_name=image_path.name,
+        source_file=image_path.name,
         status="ERROR",
         error_message=message,
         low_confidence_fields=list(FIELD_PATTERNS.keys()),

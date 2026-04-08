@@ -4,5 +4,6 @@ services:
     env: python
     rootDir: backend
     buildCommand: bash build.sh
-    startCommand: python run.py
+    startCommand: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app.main:app
+    healthCheckPath: /health
     autoDeploy: true

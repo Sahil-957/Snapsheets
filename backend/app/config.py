@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     export_retention_days: int = 7
     tesseract_cmd: str | None = None
     google_application_credentials: str | None = None
+    google_application_credentials_json: str | None = None
 
     @field_validator("debug", mode="before")
     @classmethod

@@ -50,6 +50,7 @@ pip install -r requirements.txt
 3. Copy `.env.example` to `.env` and update:
    - `TESSERACT_CMD` if Tesseract is not on your PATH
    - `GOOGLE_APPLICATION_CREDENTIALS` with your Google Vision service account JSON path
+   - or `GOOGLE_APPLICATION_CREDENTIALS_JSON` with the raw service account JSON for cloud deployments like Render
 4. Start the API:
 
 ```bash
