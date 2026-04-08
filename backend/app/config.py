@@ -7,7 +7,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Bulk OCR Extractor API"
     debug: bool = Field(default=False)
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins: list[str] = [
+        "https://snapsheets.vercel.app",
+        "https://www.snapsheets.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    cors_origin_regex: str = r"^https://([a-z0-9-]+\.)?vercel\.app$"
     storage_root: Path = Path("storage")
     uploads_dir_name: str = "uploads"
     outputs_dir_name: str = "outputs"
@@ -16,6 +22,7 @@ class Settings(BaseSettings):
     max_workers: int = 4
     batch_size: int = 10
     upload_max_files: int = 10000
+    upload_max_part_size_mb: int = 25
     export_retention_days: int = 7
     tesseract_cmd: str | None = None
     google_application_credentials: str | None = None

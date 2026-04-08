@@ -15,14 +15,10 @@ from app.services.storage import sha256_file, store
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
-origins = [
-    "https://snapsheets.vercel.app",
-    "http://localhost:3000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -64,7 +60,10 @@ def health() -> dict[str, str]:
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_images(request: Request) -> UploadResponse:
-    form = await request.form(max_files=settings.upload_max_files)
+    form = await request.form(
+        max_files=settings.upload_max_files,
+        max_part_size=settings.upload_max_part_size_mb * 1024 * 1024,
+    )
     files = [value for _, value in form.multi_items() if isinstance(value, UploadFile)]
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
