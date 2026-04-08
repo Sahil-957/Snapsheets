@@ -53,6 +53,12 @@ def _normalize_number(value: str | None) -> str | None:
     return match.group(0) if match else _clean(value)
 
 
+def _normalize_numeric_candidates(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return re.findall(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
+
+
 def _extract_crop_text(
     image: np.ndarray,
     region: tuple[float, float, float, float],
@@ -80,6 +86,51 @@ def _extract_numeric_crop(
         threshold=True,
     )
     return _normalize_number(text), confidence
+
+
+def _extract_line_text(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+    *,
+    scale: int = 6,
+    threshold: bool = True,
+) -> tuple[str | None, float]:
+    return _extract_crop_text(image, region, config="--psm 6", scale=scale, threshold=threshold)
+
+
+def _extract_last_number_from_line(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+    *,
+    scale: int = 6,
+) -> tuple[str | None, float]:
+    text, confidence = _extract_line_text(image, region, scale=scale, threshold=True)
+    numbers = _normalize_numeric_candidates(text)
+    return (numbers[-1] if numbers else None), confidence
+
+
+def _extract_first_number_from_line(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+    *,
+    scale: int = 6,
+) -> tuple[str | None, float]:
+    text, confidence = _extract_line_text(image, region, scale=scale, threshold=True)
+    numbers = _normalize_numeric_candidates(text)
+    return (numbers[0] if numbers else None), confidence
+
+
+def _extract_two_numbers_from_line(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+    *,
+    scale: int = 6,
+) -> tuple[str | None, str | None, float]:
+    text, confidence = _extract_line_text(image, region, scale=scale, threshold=True)
+    numbers = _normalize_numeric_candidates(text)
+    first = numbers[0] if len(numbers) >= 1 else None
+    second = numbers[1] if len(numbers) >= 2 else None
+    return first, second, confidence
 
 
 def _extract_checkbox(image: np.ndarray, region: tuple[float, float, float, float]) -> bool:
@@ -148,6 +199,18 @@ def _extract_particular_row(
         threshold=False,
     )
     return _normalize_number(rate) or rate, _normalize_number(cost) or cost
+
+
+def _extract_particular_line(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+) -> tuple[str | None, str | None, str | None, float]:
+    text, confidence = _extract_line_text(image, region, scale=6, threshold=True)
+    numbers = _normalize_numeric_candidates(text)
+    cleaned_text = _clean_text_field(text)
+    first = numbers[0] if len(numbers) >= 1 else None
+    second = numbers[1] if len(numbers) >= 2 else None
+    return first, second, cleaned_text, confidence
 
 
 def extract_layout_fields(image_path: Path) -> ExtractedRow:
@@ -237,33 +300,43 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
     row.weft_ppi = weft_values.get("ppi")
 
     right_metric_fields = {
-        "grey_width": (0.693, 0.316, 0.774, 0.352),
-        "epi_on_table": (0.692, 0.353, 0.775, 0.388),
-        "meters_per_120_yards": (0.694, 0.415, 0.777, 0.450),
-        "total_ends": (0.693, 0.451, 0.782, 0.486),
-        "epi_difference": (0.904, 0.317, 0.962, 0.352),
-        "reed_space": (0.904, 0.353, 0.962, 0.388),
-        "warp_crimp_percent": (0.904, 0.415, 0.962, 0.450),
+        "grey_width": (0.585, 0.316, 0.785, 0.352),
+        "epi_on_table": (0.585, 0.351, 0.785, 0.388),
+        "meters_per_120_yards": (0.585, 0.410, 0.785, 0.452),
+        "total_ends": (0.585, 0.448, 0.785, 0.488),
+        "epi_difference": (0.815, 0.316, 0.972, 0.352),
+        "reed_space": (0.815, 0.351, 0.972, 0.388),
+        "warp_crimp_percent": (0.815, 0.410, 0.972, 0.452),
     }
     for field_name, region in right_metric_fields.items():
-        value, confidence = _extract_numeric_crop(image, region)
+        value, confidence = _extract_last_number_from_line(image, region, scale=7)
         setattr(row, field_name, value)
         confidences.append(confidence)
 
-    lower_left_fields = {
-        "weight_warp1": (0.083, 0.605, 0.127, 0.640),
-        "cost_warp1": (0.136, 0.605, 0.183, 0.640),
-        "composition_warp1": (0.188, 0.605, 0.237, 0.640),
-        "weight_weft1": (0.083, 0.676, 0.127, 0.711),
-        "cost_weft1": (0.136, 0.676, 0.183, 0.711),
-        "composition_weft1": (0.188, 0.676, 0.237, 0.711),
-        "gsm_total_yarn_cost": (0.086, 0.739, 0.126, 0.774),
-        "fabric_total_yarn_cost": (0.137, 0.739, 0.188, 0.774),
-        "fabric_weight_glm_inc_sizing": (0.086, 0.789, 0.128, 0.824),
+    weight_lines = {
+        "warp1": (0.024, 0.605, 0.245, 0.640),
+        "warp2": (0.024, 0.639, 0.245, 0.675),
+        "warp3": (0.024, 0.673, 0.245, 0.709),
+        "weft1": (0.024, 0.707, 0.245, 0.743),
+        "gsm_total": (0.024, 0.741, 0.245, 0.778),
+        "fabric_weight": (0.024, 0.790, 0.245, 0.827),
     }
-    for field_name, region in lower_left_fields.items():
-        value, confidence = _extract_numeric_crop(image, region)
-        setattr(row, field_name, value)
+    weight_map = {
+        "warp1": ("weight_warp1", "cost_warp1", "composition_warp1"),
+        "weft1": ("weight_weft1", "cost_weft1", "composition_weft1"),
+    }
+    for key, region in weight_lines.items():
+        text, confidence = _extract_line_text(image, region, scale=7, threshold=True)
+        numbers = _normalize_numeric_candidates(text)
+        if key in weight_map and len(numbers) >= 3:
+            setattr(row, weight_map[key][0], numbers[0])
+            setattr(row, weight_map[key][1], numbers[1])
+            setattr(row, weight_map[key][2], numbers[2])
+        elif key == "gsm_total" and len(numbers) >= 2:
+            row.gsm_total_yarn_cost = numbers[0]
+            row.fabric_total_yarn_cost = numbers[1]
+        elif key == "fabric_weight" and numbers:
+            row.fabric_weight_glm_inc_sizing = numbers[-1]
         confidences.append(confidence)
 
     particular_regions = {
@@ -281,46 +354,53 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
         "extra_remarks_if_any": (0.451, 0.940, 0.735, 0.973),
     }
 
-    row.sizing_per_kg_rate, row.sizing_per_kg_cost = _extract_particular_row(image, particular_regions["sizing_per_kg"])
-    row.weaving_charges_rate, row.weaving_charges_cost = _extract_particular_row(image, particular_regions["weaving_charges"])
-    row.freight_rate, row.freight_cost = _extract_particular_row(image, particular_regions["freight"])
-    row.butta_cutting_rate, row.butta_cutting_cost = _extract_particular_row(image, particular_regions["butta_cutting"])
-    row.yarn_wastage_rate, row.yarn_wastage_cost = _extract_particular_row(image, particular_regions["yarn_wastage"])
-    row.value_loss_interest_rate, row.value_loss_interest_cost = _extract_particular_row(image, particular_regions["value_loss_interest"])
-    row.commission_cd_rate, row.commission_cd_cost = _extract_particular_row(image, particular_regions["commission_cd"])
+    for key, region, target in [
+        ("sizing_per_kg", particular_regions["sizing_per_kg"], ("sizing_per_kg_rate", "sizing_per_kg_cost")),
+        ("weaving_charges", particular_regions["weaving_charges"], ("weaving_charges_rate", "weaving_charges_cost")),
+        ("freight", particular_regions["freight"], ("freight_rate", "freight_cost")),
+        ("butta_cutting", particular_regions["butta_cutting"], ("butta_cutting_rate", "butta_cutting_cost")),
+        ("yarn_wastage", particular_regions["yarn_wastage"], ("yarn_wastage_rate", "yarn_wastage_cost")),
+        ("value_loss_interest", particular_regions["value_loss_interest"], ("value_loss_interest_rate", "value_loss_interest_cost")),
+        ("commission_cd", particular_regions["commission_cd"], ("commission_cd_rate", "commission_cd_cost")),
+    ]:
+        first, second, _text, conf = _extract_particular_line(image, region)
+        setattr(row, target[0], first)
+        setattr(row, target[1], second)
+        confidences.append(conf)
 
-    row.payment_term, conf = _extract_crop_text(image, particular_regions["payment_term"], config="--psm 7", scale=6)
+    _first, _second, payment_text, conf = _extract_particular_line(image, particular_regions["payment_term"])
+    row.payment_term = _clean_text_field(payment_text)
     confidences.append(conf)
-    row.payment_term = _clean_text_field(row.payment_term)
-    row.particulars_total_cost, conf = _extract_numeric_crop(image, particular_regions["particulars_total"], scale=6)
+
+    total_first, total_second, _text, conf = _extract_particular_line(image, particular_regions["particulars_total"])
+    row.particulars_total_cost = total_second or total_first
     confidences.append(conf)
-    row.remark, conf = _extract_crop_text(image, particular_regions["remark"], config="--psm 7", scale=6)
-    row.remark = _clean_text_field(row.remark)
+
+    _first, _second, remark_text, conf = _extract_particular_line(image, particular_regions["remark"])
+    row.remark = _clean_text_field(remark_text)
     confidences.append(conf)
-    row.other_cost_if_any_rate, row.other_cost_if_any_remarks = (
-        _extract_particular_row(image, particular_regions["other_cost_if_any"])
-    )
-    row.extra_remarks_if_any, conf = _extract_crop_text(
-        image,
-        particular_regions["extra_remarks_if_any"],
-        config="--psm 6",
-        scale=6,
-    )
-    row.extra_remarks_if_any = _clean_text_field(row.extra_remarks_if_any)
+
+    first, second, text, conf = _extract_particular_line(image, particular_regions["other_cost_if_any"])
+    row.other_cost_if_any_rate = first or second
+    row.other_cost_if_any_remarks = _clean_text_field(text)
+    confidences.append(conf)
+
+    _first, _second, text, conf = _extract_particular_line(image, particular_regions["extra_remarks_if_any"])
+    row.extra_remarks_if_any = _clean_text_field(text)
     confidences.append(conf)
 
     right_cost_fields = {
-        "total_price": (0.890, 0.548, 0.949, 0.580),
-        "target_price": (0.890, 0.582, 0.949, 0.614),
-        "weaving_charge_as_per_tp": (0.890, 0.618, 0.949, 0.649),
-        "order_quantity": (0.890, 0.653, 0.962, 0.685),
-        "yarn_requirement_warp1": (0.890, 0.688, 0.949, 0.719),
-        "yarn_requirement_weft1": (0.890, 0.758, 0.949, 0.789),
-        "yarn_requirement_total": (0.890, 0.828, 0.949, 0.860),
-        "cover_factor": (0.890, 0.899, 0.949, 0.931),
+        "total_price": (0.760, 0.548, 0.968, 0.580),
+        "target_price": (0.760, 0.582, 0.968, 0.614),
+        "weaving_charge_as_per_tp": (0.760, 0.618, 0.968, 0.649),
+        "order_quantity": (0.760, 0.653, 0.968, 0.685),
+        "yarn_requirement_warp1": (0.760, 0.688, 0.968, 0.719),
+        "yarn_requirement_weft1": (0.760, 0.758, 0.968, 0.789),
+        "yarn_requirement_total": (0.760, 0.828, 0.968, 0.860),
+        "cover_factor": (0.760, 0.899, 0.968, 0.931),
     }
     for field_name, region in right_cost_fields.items():
-        value, confidence = _extract_numeric_crop(image, region)
+        value, confidence = _extract_last_number_from_line(image, region, scale=8)
         setattr(row, field_name, value)
         confidences.append(confidence)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -38,7 +39,7 @@ class OCRService:
                 return str(candidate)
         return None
 
-    def extract_text(self, image: np.ndarray, original_path: Path, threshold: float) -> dict[str, str | float]:
+    def extract_text(self, image: np.ndarray, original_path: Path, threshold: float) -> dict[str, Any]:
         tesseract_result = self._run_tesseract(image)
         if tesseract_result["confidence"] >= threshold or not self._vision_ready():
             return tesseract_result
@@ -46,12 +47,13 @@ class OCRService:
         vision_result = self._run_google_vision(original_path)
         return vision_result if vision_result["text"] else tesseract_result
 
-    def _run_tesseract(self, image: np.ndarray) -> dict[str, str | float]:
+    def _run_tesseract(self, image: np.ndarray) -> dict[str, Any]:
         if not self._tesseract_available:
             return {
                 "text": "",
                 "confidence": 0.0,
                 "engine": "tesseract-unavailable",
+                "words": [],
             }
 
         config = "--oem 3 --psm 6"
@@ -67,6 +69,7 @@ class OCRService:
                 "text": "",
                 "confidence": 0.0,
                 "engine": "tesseract-unavailable",
+                "words": [],
             }
 
         tokens: list[str] = []
@@ -87,6 +90,7 @@ class OCRService:
             "text": "\n".join(tokens),
             "confidence": round(sum(confidences) / len(confidences), 2) if confidences else 0.0,
             "engine": "tesseract",
+            "words": [],
         }
 
     def _vision_ready(self) -> bool:
@@ -100,7 +104,7 @@ class OCRService:
             self._vision_client = vision.ImageAnnotatorClient()
         return self._vision_client
 
-    def _run_google_vision(self, image_path: Path) -> dict[str, str | float]:
+    def _run_google_vision(self, image_path: Path) -> dict[str, Any]:
         try:
             client = self._get_vision_client()
             content = image_path.read_bytes()
@@ -112,16 +116,19 @@ class OCRService:
                 "text": "",
                 "confidence": 0.0,
                 "engine": "google-vision-unavailable",
+                "words": [],
             }
 
         annotation = response.full_text_annotation
         text = annotation.text if annotation else ""
         scores = [page.confidence for page in annotation.pages] if annotation and annotation.pages else []
         confidence = round((sum(scores) / len(scores)) * 100, 2) if scores else 0.0
+        words = self._extract_google_words(annotation)
         return {
             "text": text,
             "confidence": confidence,
             "engine": "google-vision",
+            "words": words,
         }
 
     def extract_crop_text(
@@ -190,6 +197,40 @@ class OCRService:
             if path.exists():
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path)
                 self._vision_credentials_path = path
+
+    def _extract_google_words(self, annotation: vision.TextAnnotation | None) -> list[dict[str, float | str]]:
+        if not annotation:
+            return []
+
+        words: list[dict[str, float | str]] = []
+        for page in annotation.pages:
+            for block in page.blocks:
+                for paragraph in block.paragraphs:
+                    for word in paragraph.words:
+                        token = "".join(symbol.text for symbol in word.symbols).strip()
+                        if not token:
+                            continue
+                        vertices = word.bounding_box.vertices
+                        xs = [vertex.x for vertex in vertices if vertex.x is not None]
+                        ys = [vertex.y for vertex in vertices if vertex.y is not None]
+                        if not xs or not ys:
+                            continue
+                        left = float(min(xs))
+                        right = float(max(xs))
+                        top = float(min(ys))
+                        bottom = float(max(ys))
+                        words.append(
+                            {
+                                "text": token,
+                                "left": left,
+                                "right": right,
+                                "top": top,
+                                "bottom": bottom,
+                                "cx": (left + right) / 2.0,
+                                "cy": (top + bottom) / 2.0,
+                            }
+                        )
+        return words
 
 
 

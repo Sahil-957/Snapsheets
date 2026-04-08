@@ -12,6 +12,7 @@ from app.services.ocr import ocr_service
 from app.services.parser import error_row, parse_structured_text
 from app.services.preprocess import preprocess_image
 from app.services.storage import sha256_file, store
+from app.services.vision_layout import extract_vision_layout_fields
 
 
 def _process_single_file(image_path: Path, confidence_threshold: float) -> tuple[ExtractedRow, str]:
@@ -30,12 +31,27 @@ def _process_single_file(image_path: Path, confidence_threshold: float) -> tuple
     if needs_fallback:
         processed = preprocess_image(image_path)
         ocr = ocr_service.extract_text(processed, image_path, confidence_threshold)
+        vision_row = None
+        if str(ocr.get("engine")) == "google-vision" and ocr.get("words"):
+            vision_row = extract_vision_layout_fields(image_path, list(ocr.get("words", [])))
         fallback_row = parse_structured_text(
             image_path.name,
             str(ocr["text"]),
             float(ocr["confidence"]),
             str(ocr["engine"]),
         )
+        vision_preferred_fields: set[str] = set()
+        if vision_row is not None:
+            for field_name, vision_value in vision_row.model_dump().items():
+                if field_name in {"image_name", "source_file", "ocr_engine", "ocr_confidence", "status", "error_message", "low_confidence_fields"}:
+                    continue
+                if vision_value not in (None, "", []):
+                    setattr(fallback_row, field_name, vision_value)
+                    vision_preferred_fields.add(field_name)
+            fallback_row.low_confidence_fields = vision_row.low_confidence_fields or fallback_row.low_confidence_fields
+            fallback_row.status = vision_row.status
+            fallback_row.ocr_engine = vision_row.ocr_engine
+            fallback_row.ocr_confidence = max(fallback_row.ocr_confidence, vision_row.ocr_confidence)
         prefer_fallback_fields = {
             "total_price",
             "target_price",
@@ -45,6 +61,7 @@ def _process_single_file(image_path: Path, confidence_threshold: float) -> tuple
             "yarn_requirement_total",
             "fabric_weight_glm_inc_sizing",
         }
+        prefer_fallback_fields.update(vision_preferred_fields)
         for field_name in fallback_row.model_dump():
             fallback_value = getattr(fallback_row, field_name, None)
             current_value = getattr(row, field_name, None)
