@@ -22,6 +22,30 @@ def _clean(value: str) -> str | None:
     return cleaned or None
 
 
+def _clean_text_field(value: str | None) -> str | None:
+    cleaned = _clean(value or "")
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"\s*[|.,;:]+\s*$", "", cleaned).strip()
+    if cleaned.lower().startswith("select weave"):
+        return None
+    if cleaned.lower() in {"select", "weave"}:
+        return None
+    return cleaned or None
+
+
+def _extract_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", value)
+    if match:
+        return match.group(0).replace("-", "/")
+    compact = re.search(r"\b(\d{2})(\d{2})(\d{4})\b", value.replace("/", "").replace("-", ""))
+    if compact:
+        return f"{compact.group(1)}/{compact.group(2)}/{compact.group(3)}"
+    return _clean_text_field(value)
+
+
 def _normalize_number(value: str | None) -> str | None:
     if not value:
         return None
@@ -90,6 +114,20 @@ def _extract_table_row(
     return result, average_confidence
 
 
+def _extract_date_crop(
+    image: np.ndarray,
+    region: tuple[float, float, float, float],
+) -> tuple[str | None, float]:
+    text, confidence = _extract_crop_text(
+        image,
+        region,
+        config="--psm 7 -c tessedit_char_whitelist=0123456789/",
+        scale=6,
+        threshold=True,
+    )
+    return _extract_date(text), confidence
+
+
 def _extract_particular_row(
     image: np.ndarray,
     region: tuple[float, float, float, float],
@@ -125,23 +163,26 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
     confidences: list[float] = []
 
     top_fields = {
-        "date": ((0.065, 0.08, 0.18, 0.14), True),
-        "agent": ((0.205, 0.07, 0.34, 0.13), False),
-        "customer": ((0.405, 0.07, 0.56, 0.13), False),
-        "sourcing_executive": ((0.635, 0.07, 0.76, 0.13), False),
-        "weave": ((0.89, 0.07, 0.985, 0.13), False),
-        "quality": ((0.045, 0.145, 0.18, 0.235), False),
-        "shafts": ((0.205, 0.145, 0.31, 0.21), False),
-        "marketing_executive": ((0.405, 0.145, 0.545, 0.21), False),
-        "buyer_reference_no": ((0.64, 0.145, 0.79, 0.21), False),
-        "design_no": ((0.875, 0.145, 0.985, 0.21), False),
+        "date": ((0.074, 0.100, 0.168, 0.132), "date"),
+        "agent": ((0.211, 0.083, 0.290, 0.118), "text"),
+        "customer": ((0.409, 0.083, 0.520, 0.118), "text"),
+        "sourcing_executive": ((0.621, 0.082, 0.711, 0.118), "text"),
+        "weave": ((0.892, 0.082, 0.968, 0.118), "text"),
+        "quality": ((0.054, 0.150, 0.113, 0.212), "multiline"),
+        "shafts": ((0.222, 0.169, 0.295, 0.198), "text"),
+        "marketing_executive": ((0.410, 0.169, 0.522, 0.198), "text"),
+        "buyer_reference_no": ((0.662, 0.168, 0.770, 0.198), "text"),
+        "design_no": ((0.884, 0.169, 0.970, 0.198), "text"),
     }
-    for field_name, (region, numeric) in top_fields.items():
-        if numeric:
-            value, confidence = _extract_numeric_crop(image, region)
+    for field_name, (region, mode) in top_fields.items():
+        if mode == "date":
+            value, confidence = _extract_date_crop(image, region)
+        elif mode == "multiline":
+            value, confidence = _extract_crop_text(image, region, config="--psm 6", scale=6, threshold=False)
         else:
-            value, confidence = _extract_crop_text(image, region, config="--psm 6" if field_name == "quality" else "--psm 7", scale=5)
-        setattr(row, field_name, value)
+            value, confidence = _extract_crop_text(image, region, config="--psm 7", scale=6)
+            value = _clean_text_field(value)
+        setattr(row, field_name, value if field_name != "quality" else _clean_text_field(value))
         confidences.append(confidence)
 
     row.is_warp_butta = _extract_checkbox(image, (0.12, 0.212, 0.135, 0.235))
@@ -150,22 +191,22 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
     row.is_seersucker = _extract_checkbox(image, (0.595, 0.212, 0.61, 0.235))
 
     yarn_columns = {
-        "count": (0.21, 0.0, 0.265, 1.0),
-        "rate_per_kg": (0.265, 0.0, 0.345, 1.0),
-        "rate_incl_gst": (0.345, 0.0, 0.455, 1.0),
-        "gst": (0.455, 0.0, 0.515, 1.0),
-        "content": (0.515, 0.0, 0.60, 1.0),
-        "yarn_type": (0.60, 0.0, 0.70, 1.0),
-        "mill": (0.70, 0.0, 0.77, 1.0),
-        "epi_on_loom": (0.77, 0.0, 0.875, 1.0),
-        "ppi": (0.875, 0.0, 0.955, 1.0),
+        "count": (0.217, 0.0, 0.255, 1.0),
+        "rate_per_kg": (0.286, 0.0, 0.350, 1.0),
+        "rate_incl_gst": (0.384, 0.0, 0.454, 1.0),
+        "gst": (0.490, 0.0, 0.532, 1.0),
+        "content": (0.562, 0.0, 0.605, 1.0),
+        "yarn_type": (0.620, 0.0, 0.676, 1.0),
+        "mill": (0.736, 0.0, 0.772, 1.0),
+        "epi_on_loom": (0.796, 0.0, 0.848, 1.0),
+        "ppi": (0.904, 0.0, 0.946, 1.0),
     }
     warp_regions = [
-        (0.02, 0.367, 0.57, 0.402),
-        (0.02, 0.402, 0.57, 0.437),
-        (0.02, 0.437, 0.57, 0.472),
+        (0.024, 0.371, 0.568, 0.406),
+        (0.024, 0.406, 0.568, 0.441),
+        (0.024, 0.441, 0.568, 0.476),
     ]
-    weft_region = (0.02, 0.467, 0.57, 0.505)
+    weft_region = (0.024, 0.476, 0.568, 0.511)
 
     warp_rows: list[dict[str, str | None]] = []
     for region in warp_regions:
@@ -196,13 +237,13 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
     row.weft_ppi = weft_values.get("ppi")
 
     right_metric_fields = {
-        "grey_width": (0.71, 0.327, 0.78, 0.36),
-        "epi_on_table": (0.71, 0.356, 0.79, 0.39),
-        "meters_per_120_yards": (0.71, 0.418, 0.80, 0.452),
-        "total_ends": (0.71, 0.454, 0.805, 0.488),
-        "epi_difference": (0.90, 0.327, 0.965, 0.36),
-        "reed_space": (0.90, 0.358, 0.965, 0.39),
-        "warp_crimp_percent": (0.90, 0.418, 0.965, 0.452),
+        "grey_width": (0.693, 0.316, 0.774, 0.352),
+        "epi_on_table": (0.692, 0.353, 0.775, 0.388),
+        "meters_per_120_yards": (0.694, 0.415, 0.777, 0.450),
+        "total_ends": (0.693, 0.451, 0.782, 0.486),
+        "epi_difference": (0.904, 0.317, 0.962, 0.352),
+        "reed_space": (0.904, 0.353, 0.962, 0.388),
+        "warp_crimp_percent": (0.904, 0.415, 0.962, 0.450),
     }
     for field_name, region in right_metric_fields.items():
         value, confidence = _extract_numeric_crop(image, region)
@@ -210,15 +251,15 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
         confidences.append(confidence)
 
     lower_left_fields = {
-        "weight_warp1": (0.08, 0.604, 0.125, 0.638),
-        "cost_warp1": (0.14, 0.604, 0.19, 0.638),
-        "composition_warp1": (0.19, 0.604, 0.255, 0.638),
-        "weight_weft1": (0.08, 0.688, 0.125, 0.722),
-        "cost_weft1": (0.14, 0.688, 0.19, 0.722),
-        "composition_weft1": (0.19, 0.688, 0.255, 0.722),
-        "gsm_total_yarn_cost": (0.085, 0.739, 0.135, 0.773),
-        "fabric_total_yarn_cost": (0.14, 0.739, 0.198, 0.773),
-        "fabric_weight_glm_inc_sizing": (0.085, 0.793, 0.145, 0.827),
+        "weight_warp1": (0.083, 0.605, 0.127, 0.640),
+        "cost_warp1": (0.136, 0.605, 0.183, 0.640),
+        "composition_warp1": (0.188, 0.605, 0.237, 0.640),
+        "weight_weft1": (0.083, 0.676, 0.127, 0.711),
+        "cost_weft1": (0.136, 0.676, 0.183, 0.711),
+        "composition_weft1": (0.188, 0.676, 0.237, 0.711),
+        "gsm_total_yarn_cost": (0.086, 0.739, 0.126, 0.774),
+        "fabric_total_yarn_cost": (0.137, 0.739, 0.188, 0.774),
+        "fabric_weight_glm_inc_sizing": (0.086, 0.789, 0.128, 0.824),
     }
     for field_name, region in lower_left_fields.items():
         value, confidence = _extract_numeric_crop(image, region)
@@ -226,18 +267,18 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
         confidences.append(confidence)
 
     particular_regions = {
-        "sizing_per_kg": (0.255, 0.581, 0.74, 0.614),
-        "weaving_charges": (0.255, 0.616, 0.74, 0.649),
-        "freight": (0.255, 0.652, 0.74, 0.685),
-        "butta_cutting": (0.255, 0.688, 0.74, 0.721),
-        "yarn_wastage": (0.255, 0.724, 0.74, 0.757),
-        "value_loss_interest": (0.255, 0.759, 0.74, 0.792),
-        "payment_term": (0.255, 0.796, 0.74, 0.829),
-        "particulars_total": (0.255, 0.832, 0.74, 0.865),
-        "commission_cd": (0.255, 0.87, 0.74, 0.903),
-        "remark": (0.255, 0.907, 0.74, 0.939),
-        "other_cost_if_any": (0.255, 0.947, 0.74, 0.979),
-        "extra_remarks_if_any": (0.255, 0.979, 0.74, 1.0),
+        "sizing_per_kg": (0.424, 0.546, 0.722, 0.579),
+        "weaving_charges": (0.424, 0.581, 0.722, 0.614),
+        "freight": (0.424, 0.617, 0.722, 0.650),
+        "butta_cutting": (0.424, 0.652, 0.722, 0.685),
+        "yarn_wastage": (0.424, 0.688, 0.722, 0.721),
+        "value_loss_interest": (0.424, 0.724, 0.722, 0.757),
+        "payment_term": (0.424, 0.761, 0.722, 0.794),
+        "particulars_total": (0.424, 0.797, 0.722, 0.830),
+        "commission_cd": (0.424, 0.835, 0.722, 0.867),
+        "remark": (0.424, 0.871, 0.722, 0.903),
+        "other_cost_if_any": (0.451, 0.906, 0.735, 0.940),
+        "extra_remarks_if_any": (0.451, 0.940, 0.735, 0.973),
     }
 
     row.sizing_per_kg_rate, row.sizing_per_kg_cost = _extract_particular_row(image, particular_regions["sizing_per_kg"])
@@ -248,11 +289,13 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
     row.value_loss_interest_rate, row.value_loss_interest_cost = _extract_particular_row(image, particular_regions["value_loss_interest"])
     row.commission_cd_rate, row.commission_cd_cost = _extract_particular_row(image, particular_regions["commission_cd"])
 
-    row.payment_term, conf = _extract_crop_text(image, particular_regions["payment_term"], config="--psm 7", scale=5)
+    row.payment_term, conf = _extract_crop_text(image, particular_regions["payment_term"], config="--psm 7", scale=6)
     confidences.append(conf)
-    row.particulars_total_cost, conf = _extract_crop_text(image, particular_regions["particulars_total"], config="--psm 7", scale=5)
+    row.payment_term = _clean_text_field(row.payment_term)
+    row.particulars_total_cost, conf = _extract_numeric_crop(image, particular_regions["particulars_total"], scale=6)
     confidences.append(conf)
-    row.remark, conf = _extract_crop_text(image, particular_regions["remark"], config="--psm 7", scale=5)
+    row.remark, conf = _extract_crop_text(image, particular_regions["remark"], config="--psm 7", scale=6)
+    row.remark = _clean_text_field(row.remark)
     confidences.append(conf)
     row.other_cost_if_any_rate, row.other_cost_if_any_remarks = (
         _extract_particular_row(image, particular_regions["other_cost_if_any"])
@@ -261,19 +304,20 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
         image,
         particular_regions["extra_remarks_if_any"],
         config="--psm 6",
-        scale=5,
+        scale=6,
     )
+    row.extra_remarks_if_any = _clean_text_field(row.extra_remarks_if_any)
     confidences.append(conf)
 
     right_cost_fields = {
-        "total_price": (0.885, 0.548, 0.955, 0.58),
-        "target_price": (0.885, 0.582, 0.955, 0.614),
-        "weaving_charge_as_per_tp": (0.885, 0.616, 0.955, 0.648),
-        "order_quantity": (0.885, 0.651, 0.965, 0.684),
-        "yarn_requirement_warp1": (0.885, 0.688, 0.955, 0.72),
-        "yarn_requirement_weft1": (0.885, 0.758, 0.955, 0.79),
-        "yarn_requirement_total": (0.885, 0.829, 0.955, 0.861),
-        "cover_factor": (0.885, 0.9, 0.955, 0.932),
+        "total_price": (0.890, 0.548, 0.949, 0.580),
+        "target_price": (0.890, 0.582, 0.949, 0.614),
+        "weaving_charge_as_per_tp": (0.890, 0.618, 0.949, 0.649),
+        "order_quantity": (0.890, 0.653, 0.962, 0.685),
+        "yarn_requirement_warp1": (0.890, 0.688, 0.949, 0.719),
+        "yarn_requirement_weft1": (0.890, 0.758, 0.949, 0.789),
+        "yarn_requirement_total": (0.890, 0.828, 0.949, 0.860),
+        "cover_factor": (0.890, 0.899, 0.949, 0.931),
     }
     for field_name, region in right_cost_fields.items():
         value, confidence = _extract_numeric_crop(image, region)
@@ -282,6 +326,15 @@ def extract_layout_fields(image_path: Path) -> ExtractedRow:
 
     if row.quality:
         row.quality = row.quality.replace("lity", "").strip()
+        row.quality = _clean_text_field(row.quality)
+
+    row.agent = _clean_text_field(row.agent)
+    row.customer = _clean_text_field(row.customer)
+    row.sourcing_executive = _clean_text_field(row.sourcing_executive)
+    row.weave = _clean_text_field(row.weave)
+    row.marketing_executive = _clean_text_field(row.marketing_executive)
+    row.buyer_reference_no = _clean_text_field(row.buyer_reference_no)
+    row.design_no = _clean_text_field(row.design_no)
 
     important_fields = [
         "date",
