@@ -81,6 +81,12 @@ npm run dev
 
 Frontend default URL: `http://localhost:3000`
 
+For Vercel deployments, set `NEXT_PUBLIC_API_BASE_URL` to your public FastAPI backend URL on Render, for example:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=https://your-backend.onrender.com
+```
+
 ## Workflow
 
 1. Upload a batch of images.
